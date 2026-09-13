@@ -20,6 +20,7 @@ it('keeps disabled packages visible and offers recovery without a running backen
     runInContext(readFileSync(new URL('../renderer/plugin-manager.js', import.meta.url), 'utf8'), dom.getInternalVMContext())
     const document = dom.window.document
     await expect.poll(() => document.querySelector('#plugins li')?.textContent).toContain('example-plugin')
+    expect(document.querySelector('#package-label')?.textContent).toMatchInlineSnapshot('"npm package or local .tgz path"')
     expect(document.querySelector<HTMLElement>('#recovery')?.hidden).toBe(false)
     expect(document.querySelector('#startup-error')?.textContent).toBe('plugin requires Cordis ^2.0.0')
     document.querySelector<HTMLButtonElement>('#disable-all')?.click()

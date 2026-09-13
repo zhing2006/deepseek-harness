@@ -17,7 +17,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs'
-import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import {
   DESKTOP_HOST_PACKAGE,
   desktopCorePackageOverrides,
@@ -121,6 +121,11 @@ function assertVersion(version: string): void {
   if (!VERSION_PATTERN.test(version)) throw new Error(`desktop project: invalid exact version ${JSON.stringify(version)}`)
 }
 
+function localArchivePath(spec: string, projectDir: string): string | undefined {
+  const path = spec.startsWith('file:') ? spec.slice(5) : isAbsolute(spec) ? spec : undefined
+  return path !== undefined && /\.tgz$/iu.test(path) ? resolve(projectDir, path) : undefined
+}
+
 /**
  * Validate one registry package spec and return its package name.
  * @param spec - npm registry name with an optional version or tag.
@@ -158,8 +163,9 @@ function projectManifest(projectDir: string): DesktopProjectManifest {
   }
   const manifest = { ...value, dependencies: value.dependencies ?? {} } as unknown as DesktopProjectManifest
   if (Object.entries(manifest.dependencies).some(([name, version]) => !PACKAGE_NAME_PATTERN.test(name)
-    || typeof version !== 'string' || valid(version) !== version)) {
-    throw new Error('desktop project: plugin dependencies must use exact registry versions')
+    || typeof version !== 'string' || (valid(version) !== version
+      && (!version.startsWith('file:') || localArchivePath(version, projectDir) === undefined)))) {
+    throw new Error('desktop project: plugin dependencies must use exact registry versions or local .tgz files')
   }
   return manifest
 }
@@ -376,11 +382,21 @@ export class DesktopProjectManager {
   private async applyMutation(projectDir: string, mutation: Exclude<DesktopProjectMutation, { type: 'plugins-disable-all' }>): Promise<void> {
     switch (mutation.type) {
       case 'plugin-add': {
-        const requestedName = packageNameFromSpec(mutation.spec)
+        const archive = localArchivePath(mutation.spec, projectDir)
+        let requestedName = archive === undefined ? packageNameFromSpec(mutation.spec) : undefined
         if (this.currentRuntime().sharedPackages.some(entry => entry.name === requestedName)) {
           throw new Error(`desktop project: cannot install host-owned package ${requestedName}`)
         }
-        await this.runPnpm(projectDir, ['add', mutation.spec, '--save-exact', '--ignore-scripts'])
+        const spec = archive === undefined ? mutation.spec : `file:${archive.replaceAll('\\', '/')}`
+        await this.runPnpm(projectDir, ['add', spec, '--save-exact', '--ignore-scripts'])
+        if (archive !== undefined) {
+          requestedName = Object.entries(projectManifest(projectDir).dependencies)
+            .find(([, source]) => localArchivePath(source, projectDir) === archive)?.[0]
+        }
+        if (requestedName === undefined) throw new Error('desktop project: local archive installed no matching plugin')
+        if (this.currentRuntime().sharedPackages.some(entry => entry.name === requestedName)) {
+          throw new Error(`desktop project: cannot install host-owned package ${requestedName}`)
+        }
         const installed = { ...inspectPlugin(projectDir, requestedName), enabled: true }
         const current = pluginRecords(projectDir).filter(plugin => plugin.name !== installed.name)
         writeProfilePlugins(

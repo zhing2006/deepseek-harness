@@ -70,3 +70,37 @@ it('installs a real pnpm graph, then executes approved scripts with the shared h
     rmSync(root, { recursive: true, force: true })
   }
 }, 30_000)
+
+it('installs, replaces, reinstalls and removes a local archive through real pnpm', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'desktop local plugin ')))
+  try {
+    const dsh = join(root, 'dsh')
+    runtimeFixture(dsh)
+    const pnpm = join(import.meta.dirname, '../node_modules/pnpm/bin/pnpm.mjs')
+    const paths = resolveDesktopPaths(join(root, '.dsh'))
+    const manager = new DesktopProjectManager(paths, { node: process.execPath, pnpm, dsh })
+    const hooks: DesktopProjectHooks = { beforeChange: async () => {}, afterChange: async () => {} }
+    await manager.applyRelease()
+    const archive = join(root, 'local plugin.tgz')
+    for (const version of ['1.0.0', '1.1.0']) {
+      const source = writePackage(join(root, 'source'), 'local-plugin', {
+        version, peerDependencies: { '@deepseek-ai/cordis': '^1.0.0' }, dsh: { bundle: { patch: 'bundle.yml' } },
+      })
+      writeFileSync(join(source, 'bundle.yml'), '[]\n')
+      await c({ file: archive, cwd: join(source, '..'), gzip: true }, ['local-plugin'])
+      await manager.mutate({ type: 'plugin-add', spec: archive }, hooks)
+      expect(manager.listPlugins()).toEqual([{ name: 'local-plugin', version, enabled: true }])
+    }
+    runtimeFixture(dsh, '1.0.0', '24.18.0')
+    const restarted = new DesktopProjectManager(paths, { node: process.execPath, pnpm, dsh })
+    await restarted.applyRelease()
+    expect(restarted.listPlugins()).toEqual([{ name: 'local-plugin', version: '1.1.0', enabled: true }])
+    await restarted.mutate({ type: 'plugin-remove', name: 'local-plugin' }, hooks)
+    expect(restarted.listPlugins()).toEqual([])
+    const invalid = join(root, 'invalid.tgz')
+    writeFileSync(invalid, 'not a tar archive')
+    await expect(restarted.mutate({ type: 'plugin-add', spec: invalid }, hooks)).rejects.toThrow(/pnpm exited/u)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}, 30_000)
