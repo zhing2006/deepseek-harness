@@ -63,7 +63,7 @@ Workspace development runs the current CLI and private Desktop Host packages und
 
 ## Package
 
-The normal packaging path is one complete command. It performs release preparation before creating the host platform's installers and update metadata. Every target requires a reverse-DNS `DSH_DESKTOP_APP_ID`. macOS targets additionally require the electron-builder certificate qualifier in `DSH_DESKTOP_MACOS_SIGNING_IDENTITY`, its 10-character Apple Team ID in `DSH_DESKTOP_MACOS_TEAM_ID`, and one complete notarytool credential strategy. The App Store Connect API-key strategy uses these variables:
+The normal packaging path is one complete command. It performs release preparation before creating the host platform's installers and update metadata. Release builds require a reverse-DNS `DSH_DESKTOP_APP_ID`. macOS targets additionally require the electron-builder certificate qualifier in `DSH_DESKTOP_MACOS_SIGNING_IDENTITY`, its 10-character Apple Team ID in `DSH_DESKTOP_MACOS_TEAM_ID`, and one complete notarytool credential strategy. The App Store Connect API-key strategy uses these variables:
 
 ```sh
 export DSH_DESKTOP_APP_ID='<reverse-DNS application ID>'
@@ -91,6 +91,21 @@ pnpm run package:desktop:win:x64
 The macOS arm64 command requires Apple Silicon. The macOS x64 command runs on Intel macOS or Apple Silicon with Rosetta. The Windows x64 command requires Windows x64. Linux is not a supported Desktop release target.
 
 Each target owns its packed package inputs, prepared runtime, package set, dsh tree, pnpm preparation state, unpacked application, update metadata, and final artifacts under `apps/desktop/.desktop-build/targets/<target>/`. The Node.js archive cache remains shared under `.desktop-build/downloads` because every archive name includes its version, platform, and architecture and is verified before extraction. A target build never consumes another target's mutable preparation state.
+
+<a id="test-plugins-without-an-apple-developer-membership"></a>
+### Test plugins without an Apple Developer membership
+
+Use an ad-hoc signed macOS build to test Desktop plugins locally or share an internal test build. Apple Silicon builds require no signing certificate, Team ID, notarization credentials, or update origin:
+
+```sh
+pnpm run package:desktop:mac:arm64:adhoc
+```
+
+The command produces DMG and ZIP files under `apps/desktop/.desktop-build/targets/mac-arm64/adhoc/artifacts/`. The `:adhoc:dir` variant produces only the runnable `.app`; Intel targets use `mac:x64` instead of `mac:arm64`. Each ad-hoc target owns its preparation directories separately from release builds. `DSH_DESKTOP_APP_ID` defaults to `local.deepseek.harness.adhoc` in this mode and can be overridden with an explicit reverse-DNS identifier. The default signed-release commands still require their release identifiers and credentials.
+
+Open the packaged application and select **Desktop Plugins…** in the application menu to install a compatible npm bundle or a built plugin's local `.tgz` by absolute path. This uses the packaged Node.js, pnpm, and Desktop profile. Ad-hoc builds share the normal Harness home unless `DSH_HOME` is set before launch; choose a separate home for isolated plugin tests.
+
+Ad-hoc builds retain hardened runtime and signature verification but have no Developer ID identity or notarization ticket. Recipients may need to approve the trusted application in macOS Privacy & Security; managed Macs can prohibit that approval. These builds omit automatic-update configuration and release completion records, and the release upload commands do not consume their artifacts. The [ad-hoc packaging decision](../../.agents/notes/implemented/process/2026-09-14-macos-ad-hoc-desktop-packaging.md) records the signing and release separation.
 
 ### Runtime file selection
 

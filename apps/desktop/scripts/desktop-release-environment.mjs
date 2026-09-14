@@ -35,14 +35,34 @@ function requireEnvironmentValue(env, name) {
 /**
  * Resolve and validate the application identifier shared by every platform target.
  * @param {NodeJS.ProcessEnv} env - Packaging environment.
+ * @param {boolean} [adHoc] - Allow a local test identifier when the application ID is absent.
  * @returns {string} Reverse-DNS application identifier.
  */
-export function resolveDesktopAppId(env) {
-  const appId = requireEnvironmentValue(env, DESKTOP_APP_ID_ENV)
+export function resolveDesktopAppId(env, adHoc = false) {
+  const appId = adHoc && env[DESKTOP_APP_ID_ENV] === undefined
+    ? 'local.deepseek.harness.adhoc'
+    : requireEnvironmentValue(env, DESKTOP_APP_ID_ENV)
   if (!/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/u.test(appId)) {
     throw new Error(`desktop release environment: ${DESKTOP_APP_ID_ENV} must be a reverse-DNS identifier`)
   }
   return appId
+}
+
+/**
+ * Resolve the explicit macOS internal-test signing mode.
+ * @param {NodeJS.ProcessEnv} env - Packaging environment.
+ * @param {string} platform - Selected target platform.
+ * @returns {boolean} Whether to use ad-hoc signing without notarization.
+ */
+export function resolveMacOSAdHocBuild(env, platform) {
+  const value = env.DSH_DESKTOP_AD_HOC
+  if (value !== undefined && value !== '0' && value !== '1') {
+    throw new Error('desktop package: DSH_DESKTOP_AD_HOC must be 0 or 1')
+  }
+  if (value !== '1') return false
+  if (platform !== 'darwin') throw new Error('desktop package: ad-hoc builds require macOS')
+  if (env.DSH_DESKTOP_UNSIGNED === '1') throw new Error('desktop package: ad-hoc and unsigned modes are mutually exclusive')
+  return true
 }
 
 /**

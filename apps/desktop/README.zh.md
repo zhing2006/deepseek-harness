@@ -63,7 +63,7 @@ Workspace 开发使用调用命令的 Node.js 运行当前 CLI 与私有 Desktop
 
 ## 打包
 
-正常打包只需执行一条完整命令。该命令会先准备发布资源，再生成宿主平台的安装包与更新元数据。所有目标都要求通过 `DSH_DESKTOP_APP_ID` 提供反向域名形式的应用 ID。macOS 目标还要求通过 `DSH_DESKTOP_MACOS_SIGNING_IDENTITY` 提供 electron-builder 证书限定名，通过 `DSH_DESKTOP_MACOS_TEAM_ID` 提供对应的 10 字符 Apple Team ID，并提供一套完整的 notarytool 凭据方案。App Store Connect API Key 方式使用以下变量：
+正常打包只需执行一条完整命令。该命令会先准备发布资源，再生成宿主平台的安装包与更新元数据。发布构建要求通过 `DSH_DESKTOP_APP_ID` 提供反向域名形式的应用 ID。macOS 目标还要求通过 `DSH_DESKTOP_MACOS_SIGNING_IDENTITY` 提供 electron-builder 证书限定名，通过 `DSH_DESKTOP_MACOS_TEAM_ID` 提供对应的 10 字符 Apple Team ID，并提供一套完整的 notarytool 凭据方案。App Store Connect API Key 方式使用以下变量：
 
 ```sh
 export DSH_DESKTOP_APP_ID='<reverse-DNS application ID>'
@@ -91,6 +91,21 @@ pnpm run package:desktop:win:x64
 macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。Linux 不是受支持的 Desktop 发布目标。
 
 每个目标都在 `apps/desktop/.desktop-build/targets/<target>/` 下持有自己的打包输入、已准备运行时、包集合、dsh 依赖树、pnpm 准备状态、未打包应用、更新元数据和最终产物。Node.js 归档缓存继续由 `.desktop-build/downloads` 共享，因为每个归档文件名都包含版本、平台和架构，并且在解包前经过验证。目标构建绝不读取其他目标的可变准备状态。
+
+<a id="test-plugins-without-an-apple-developer-membership"></a>
+### 无需 Apple 开发者会员测试插件
+
+使用 ad-hoc 签名的 macOS 构建在本机测试 Desktop 插件，或分享内部测试版本。Apple Silicon 构建不需要签名证书、Team ID、公证凭据或更新地址：
+
+```sh
+pnpm run package:desktop:mac:arm64:adhoc
+```
+
+命令在 `apps/desktop/.desktop-build/targets/mac-arm64/adhoc/artifacts/` 下生成 DMG 和 ZIP 文件。`:adhoc:dir` 变体只生成可运行的 `.app`；Intel 目标将 `mac:arm64` 换成 `mac:x64`。每个 ad-hoc 目标的准备目录与发布构建隔离。此模式下 `DSH_DESKTOP_APP_ID` 默认为 `local.deepseek.harness.adhoc`，可用显式的反向域名标识符覆盖。默认的正式签名发布命令仍要求发布标识符和凭据。
+
+打开打包后的应用，在应用菜单选择**桌面插件…**，即可安装兼容的 npm bundle，或通过绝对路径安装已构建插件的本地 `.tgz`。安装使用内置 Node.js、pnpm 和 Desktop profile。除非启动前设置 `DSH_HOME`，ad-hoc 构建会共享常规 Harness home；需要隔离插件测试时，选择独立的 home。
+
+ad-hoc 构建保留 hardened runtime 和签名验证，但没有 Developer ID 身份或公证票据。接收者可能需要在 macOS“隐私与安全”中批准可信应用；受管理的 Mac 可以禁止这种批准。这些构建不包含自动更新配置或发布完成记录，发布上传命令不会读取其产物。[ad-hoc 打包决策](../../.agents/notes/implemented/process/2026-09-14-macos-ad-hoc-desktop-packaging.zh.md)记录签名与正式发布的隔离方式。
 
 ### 运行时文件筛选
 

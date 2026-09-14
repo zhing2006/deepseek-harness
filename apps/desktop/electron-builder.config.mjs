@@ -4,6 +4,7 @@ import {
   resolveDesktopAppId,
   resolveMacOSNotarizationEnvironment,
   resolveMacOSSigningEnvironment,
+  resolveMacOSAdHocBuild,
 } from './scripts/desktop-release-environment.mjs'
 import { notarizeMacOSDiskImageArtifact } from './scripts/notarize-macos-disk-images.mjs'
 import { verifyMacOSSignatureAfterSign } from './scripts/verify-macos-signature.mjs'
@@ -12,7 +13,7 @@ import {
   installWindowsNsisBootstrapSigner,
 } from './scripts/windows-sign.mjs'
 import { resolveDesktopAutoUpdateConfig } from './scripts/desktop-auto-update-environment.mjs'
-import { desktopTargetBuildPaths, resolveDesktopBuildTarget } from './scripts/desktop-build-paths.mjs'
+import { resolveDesktopTargetBuildPaths } from './scripts/desktop-build-paths.mjs'
 
 /**
  * Create electron-builder configuration from one release environment.
@@ -26,10 +27,11 @@ export function createElectronBuilderConfig(
   hostPlatform = process.platform,
   hostArch = process.arch,
 ) {
-  const appId = resolveDesktopAppId(env)
   const targetPlatform = env.DSH_DESKTOP_TARGET_PLATFORM
   const resolvedPlatform = targetPlatform ?? hostPlatform
   const resolvedArch = env.DSH_DESKTOP_TARGET_ARCH ?? hostArch
+  const adHoc = resolveMacOSAdHocBuild(env, resolvedPlatform)
+  const appId = resolveDesktopAppId(env, adHoc)
   if (env.DSH_DESKTOP_UNSIGNED !== undefined && !['0', '1'].includes(env.DSH_DESKTOP_UNSIGNED)) {
     throw new Error('desktop package: DSH_DESKTOP_UNSIGNED must be 0 or 1')
   }
@@ -37,8 +39,8 @@ export function createElectronBuilderConfig(
   if (unsigned && resolvedPlatform !== 'win32') throw new Error('desktop package: unsigned builds require Windows')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = targetPlatform === 'win32'
-  const macOSSigning = packagesMacOS ? resolveMacOSSigningEnvironment(env) : undefined
-  if (packagesMacOS) resolveMacOSNotarizationEnvironment(env)
+  const macOSSigning = packagesMacOS ? (adHoc ? 'ad-hoc' : resolveMacOSSigningEnvironment(env)) : undefined
+  if (packagesMacOS && !adHoc) resolveMacOSNotarizationEnvironment(env)
   const windowsSigner = packagesWindows && !unsigned
     ? createWindowsTokenSigner({
         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,
@@ -50,8 +52,8 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
-  const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch))
+  const update = unsigned || adHoc ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  const buildPaths = resolveDesktopTargetBuildPaths(env, hostPlatform, hostArch)
   return {
     appId,
     productName: 'DeepSeek Harness',
@@ -72,16 +74,17 @@ export function createElectronBuilderConfig(
     ],
     mac: {
       category: 'public.app-category.developer-tools',
-      identity: macOSSigning?.signingIdentity,
+      identity: macOSSigning === 'ad-hoc' ? '-' : macOSSigning?.signingIdentity,
       forceCodeSigning: true,
       hardenedRuntime: true,
+      additionalArguments: adHoc ? ['--timestamp=none'] : undefined,
       // Native runtime files are pre-signed; PAK resources are sealed by their enclosing bundle.
       signIgnore: ['/Contents/Resources/dsh(?:/|$)', '\\.pak$'],
-      notarize: true,
+      notarize: !adHoc,
       target: ['dmg', 'zip'],
     },
     dmg: {
-      sign: true,
+      sign: !adHoc,
       writeUpdateInfo: false,
     },
     afterPack: async context => {
@@ -97,7 +100,7 @@ export function createElectronBuilderConfig(
       verifyMacOSSignatureAfterSign(context, macOSSigning ?? resolveMacOSSigningEnvironment(env))
     },
     artifactBuildCompleted: artifact => {
-      if (!artifact.file.endsWith('.dmg')) return
+      if (adHoc || !artifact.file.endsWith('.dmg')) return
       return notarizeMacOSDiskImageArtifact(
         artifact,
         env,

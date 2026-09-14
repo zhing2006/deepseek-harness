@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { closeSync, openSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 import { inventoryDesktopRuntime } from '../src/runtime-tree.ts'
-import type { MacOSSigningEnvironment } from './desktop-release-environment.mjs'
+import type { MacOSCodeSigningIdentity } from './desktop-release-environment.mjs'
 import { signMacOSRuntimeCode, verifyMacOSRuntimeCode } from './verify-macos-signature.mjs'
 
 const MACH_O_MAGICS = new Set(['cafebabe', 'cafebabf', 'cefaedfe', 'cffaedfe', 'feedface', 'feedfacf', 'bebafeca', 'bfbafeca'])
@@ -24,7 +24,7 @@ function isMachO(path: string): boolean {
  * @param expected - Required signing identity.
  * @returns Number of signed native files.
  */
-export async function signMacOSRuntime(root: string, appId: string, expected: MacOSSigningEnvironment): Promise<number> {
+export async function signMacOSRuntime(root: string, appId: string, expected: MacOSCodeSigningIdentity): Promise<number> {
   const files = inventoryDesktopRuntime(root).map(file => file.path).filter(path => isMachO(join(root, path)))
   let next = 0
   const workers = Array.from({ length: Math.min(4, files.length) }, async () => {

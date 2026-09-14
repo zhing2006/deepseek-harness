@@ -11,6 +11,7 @@ import {
   resolveDesktopAppId,
   resolveMacOSNotarizationEnvironment,
   resolveMacOSSigningEnvironment,
+  resolveMacOSAdHocBuild,
 } from '../scripts/desktop-release-environment.mjs'
 import { notarizeMacOSDiskImageArtifact } from '../scripts/notarize-macos-disk-images.mjs'
 import {
@@ -27,6 +28,8 @@ const RELEASE_ENVIRONMENT = {
   DSH_DESKTOP_APP_ID: 'com.example.desktop',
   DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
   DSH_DESKTOP_TARGET_ARCH: 'arm64',
+  DSH_DESKTOP_AD_HOC: '0',
+  DSH_DESKTOP_UNSIGNED: '0',
   DSH_DESKTOP_MACOS_SIGNING_IDENTITY: 'Example Company (TEAMID1234)',
   DSH_DESKTOP_MACOS_TEAM_ID: 'TEAMID1234',
   APPLE_API_KEY: '/private/credentials/AuthKey_TEST123456.p8',
@@ -151,6 +154,50 @@ describe('desktop macOS release signature', () => {
         `TeamIdentifier=${expected.teamId}`,
       ].join('\n'), expected)
     }).not.toThrow()
+  })
+
+  it('builds ad-hoc artifacts without release credentials or an update origin', async () => {
+    const { createElectronBuilderConfig } = await import('../electron-builder.config.mjs')
+    const config = createElectronBuilderConfig({ DSH_DESKTOP_AD_HOC: '1' }, 'darwin', 'arm64')
+    expect(portablePath(config.directories.output)).toContain('/targets/mac-arm64/adhoc/artifacts')
+    expect(config).toMatchObject({
+      appId: 'local.deepseek.harness.adhoc',
+      mac: {
+        identity: '-', forceCodeSigning: true, hardenedRuntime: true,
+        notarize: false, additionalArguments: ['--timestamp=none'],
+      },
+      dmg: { sign: false, writeUpdateInfo: false },
+      publish: null,
+    })
+    expect(config.artifactBuildCompleted({ file: '/test/internal.dmg' })).toBeUndefined()
+    expect(() => createElectronBuilderConfig({}, 'darwin', 'arm64')).toThrow(/DSH_DESKTOP_APP_ID/u)
+    expect(() => createElectronBuilderConfig({ DSH_DESKTOP_APP_ID: 'com.example.release' }, 'darwin', 'arm64'))
+      .toThrow(/DSH_DESKTOP_MACOS_SIGNING_IDENTITY/u)
+  })
+
+  it('validates ad-hoc opt-in and explicit application identifiers', () => {
+    expect(resolveMacOSAdHocBuild({}, 'darwin')).toBe(false)
+    expect(resolveMacOSAdHocBuild({ DSH_DESKTOP_AD_HOC: '0' }, 'darwin')).toBe(false)
+    expect(resolveMacOSAdHocBuild({ DSH_DESKTOP_AD_HOC: '1' }, 'darwin')).toBe(true)
+    expect(() => resolveMacOSAdHocBuild({ DSH_DESKTOP_AD_HOC: 'yes' }, 'darwin')).toThrow(/must be 0 or 1/u)
+    expect(() => resolveMacOSAdHocBuild({ DSH_DESKTOP_AD_HOC: '1' }, 'win32')).toThrow(/require macOS/u)
+    expect(() => resolveMacOSAdHocBuild({ DSH_DESKTOP_AD_HOC: '1', DSH_DESKTOP_UNSIGNED: '1' }, 'darwin'))
+      .toThrow(/mutually exclusive/u)
+    expect(resolveDesktopAppId({ DSH_DESKTOP_APP_ID: 'com.example.internal' }, true)).toBe('com.example.internal')
+    expect(() => resolveDesktopAppId({ DSH_DESKTOP_APP_ID: '' }, true)).toThrow(/non-empty/u)
+    expect(() => resolveDesktopAppId({ DSH_DESKTOP_APP_ID: 'invalid' }, true)).toThrow(/reverse-DNS/u)
+  })
+
+  it('requires ad-hoc identity and hardened runtime without a secure timestamp', () => {
+    const details = 'Signature=adhoc\nTeamIdentifier=not set\nCodeDirectory flags=0x10002(adhoc,runtime)\n'
+    expect(() => { assertMacOSSignatureDetails(details, 'ad-hoc') }).not.toThrow()
+    expect(() => { assertMacOSSignatureDetails(details, resolveMacOSSigningEnvironment(RELEASE_ENVIRONMENT)) })
+      .toThrow(/release identity/u)
+    expect(() => { assertMacOSSignatureDetails('Signature=adhoc\nTeamIdentifier=TEAMID1234', 'ad-hoc') })
+      .toThrow(/ad-hoc signature/u)
+    expect(() => { assertMacOSRuntimeSignatureDetails(details, 'ad-hoc') }).not.toThrow()
+    expect(() => { assertMacOSRuntimeSignatureDetails(details.replace('(adhoc,runtime)', '(adhoc)'), 'ad-hoc') })
+      .toThrow(/hardened runtime/u)
   })
 
   it('requires a secure timestamp and hardened runtime for runtime code', () => {

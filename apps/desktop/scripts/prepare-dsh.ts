@@ -20,6 +20,7 @@ import { writeDesktopRuntime, verifyDesktopRuntime } from '../src/runtime-tree.t
 import {
   resolveDesktopAppId,
   resolveMacOSSigningEnvironment,
+  resolveMacOSAdHocBuild,
 } from './desktop-release-environment.mjs'
 import {
   signMacOSRuntime,
@@ -134,7 +135,9 @@ async function main(): Promise<void> {
       }
     }
     if (process.platform === 'darwin') {
-      await signMacOSRuntime(DSH_OUTPUT_ROOT, resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env))
+      const adHoc = resolveMacOSAdHocBuild(process.env, process.platform)
+      await signMacOSRuntime(DSH_OUTPUT_ROOT, resolveDesktopAppId(process.env, adHoc),
+        adHoc ? 'ad-hoc' : resolveMacOSSigningEnvironment(process.env))
     }
     writeDesktopRuntime(DSH_OUTPUT_ROOT, release, packageSet.packages.map(entry => entry.name), target)
     const descriptor = await verifyDesktopRuntime(DSH_OUTPUT_ROOT, release.version, target)

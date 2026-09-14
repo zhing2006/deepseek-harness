@@ -12,6 +12,8 @@ export interface DesktopElectronBuilderConfig {
   readonly mac: {
     readonly identity: string | undefined
     readonly forceCodeSigning: boolean
+    readonly hardenedRuntime: boolean
+    readonly additionalArguments: readonly string[] | undefined
     readonly notarize: boolean
     readonly signIgnore: readonly string[]
   }

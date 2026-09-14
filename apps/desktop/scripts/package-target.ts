@@ -77,18 +77,23 @@ export function withoutWindowsSigningEnvironment(environment: NodeJS.ProcessEnv)
  * Select signing and NSIS-compatible archive filters for electron-builder.
  * @param environment - Target packaging environment.
  * @param unsigned - Whether to create a local unsigned Windows artifact.
- * @returns Packaging environment without certificate inputs for unsigned builds.
+ * @param adHoc - Whether to create an ad-hoc signed macOS test artifact.
+ * @returns Packaging environment without signing credentials for local test builds.
  */
-export function desktopElectronBuilderEnvironment(environment: NodeJS.ProcessEnv, unsigned: boolean): NodeJS.ProcessEnv {
-  const selected: NodeJS.ProcessEnv = { ...environment, DSH_DESKTOP_UNSIGNED: unsigned ? '1' : '0' }
+export function desktopElectronBuilderEnvironment(
+  environment: NodeJS.ProcessEnv, unsigned: boolean, adHoc = false,
+): NodeJS.ProcessEnv {
+  const selected: NodeJS.ProcessEnv = {
+    ...environment, DSH_DESKTOP_UNSIGNED: unsigned ? '1' : '0', DSH_DESKTOP_AD_HOC: adHoc ? '1' : '0',
+  }
   // The bundled NSIS decoder cannot extract 7-Zip's automatic ARM64-filtered entries.
   if (environment.DSH_DESKTOP_TARGET_PLATFORM === 'win32') selected.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'
-  if (!unsigned) return selected
+  if (!unsigned && !adHoc) return selected
   return {
     ...Object.fromEntries(Object.entries(withoutWindowsSigningEnvironment(selected))
-      .filter(([name]) => !/^(?:WIN_)?CSC_/iu.test(name))),
+      .filter(([name]) => !/^(?:WIN_)?CSC_/iu.test(name)
+        && (!adHoc || !/^(?:APPLE_|DSH_DESKTOP_MACOS_)/u.test(name)))),
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
-    DSH_DESKTOP_UNSIGNED: '1',
   }
 }
 
@@ -173,6 +178,7 @@ interface DesktopPackageInvocation {
   readonly directory: boolean
   readonly prepareOnly: boolean
   readonly unsigned: boolean
+  readonly adHoc: boolean
 }
 
 function hostTargetName(platform: NodeJS.Platform, arch: string): DesktopPackageTargetName {
@@ -200,10 +206,13 @@ export function parseDesktopPackageInvocation(
       dir: { type: 'boolean', default: false },
       'prepare-only': { type: 'boolean', default: false },
       unsigned: { type: 'boolean', default: false },
+      'ad-hoc': { type: 'boolean', default: false },
     },
   })
   if (positionals.length > 1) throw new Error('desktop package: expected at most one target')
   const name = positionals[0] ?? hostTargetName(hostPlatform, hostArch)
+  if (values['ad-hoc'] && values.unsigned) throw new Error('desktop package: --ad-hoc and --unsigned are mutually exclusive')
+  if (values['ad-hoc'] && !name.startsWith('mac-')) throw new Error('desktop package: --ad-hoc requires macOS')
   if (values.unsigned && name !== 'win-x64') throw new Error('desktop package: --unsigned requires win-x64')
   if (values.unsigned && values['prepare-only']) throw new Error('desktop package: --unsigned cannot use --prepare-only')
   return {
@@ -211,6 +220,7 @@ export function parseDesktopPackageInvocation(
     directory: values.dir,
     prepareOnly: values['prepare-only'],
     unsigned: values.unsigned,
+    adHoc: values['ad-hoc'],
   }
 }
 
@@ -271,21 +281,23 @@ function runPnpm(
 async function main(): Promise<void> {
   const invocation = parseDesktopPackageInvocation(process.argv.slice(2))
   const { target } = invocation
-  const buildPaths = desktopTargetBuildPaths(target.name)
+  const buildPaths = desktopTargetBuildPaths(target.name, invocation.adHoc)
   const releaseRecordPath = join(buildPaths.artifacts, desktopBuildRecordFilename(target.name))
-  if (!invocation.prepareOnly && !invocation.unsigned) {
+  if (!invocation.prepareOnly && !invocation.unsigned && !invocation.adHoc) {
     rmSync(releaseRecordPath, { force: true })
     rmSync(`${releaseRecordPath}.tmp`, { force: true })
   }
-  const buildEnv = withoutWindowsSigningEnvironment(withoutDesktopUploadCredentials(process.env))
+  const buildEnv = withoutWindowsSigningEnvironment(withoutDesktopUploadCredentials(
+    desktopElectronBuilderEnvironment(process.env, invocation.unsigned, invocation.adHoc),
+  ))
   const targetEnv: NodeJS.ProcessEnv = {
     ...buildEnv,
     DSH_DESKTOP_TARGET_PLATFORM: target.platform,
     DSH_DESKTOP_TARGET_ARCH: target.arch,
   }
-  const electronBuilderEnv = desktopElectronBuilderEnvironment(targetEnv, invocation.unsigned)
+  const electronBuilderEnv = desktopElectronBuilderEnvironment(targetEnv, invocation.unsigned, invocation.adHoc)
   for (const name of WINDOWS_SIGNING_ENV_NAMES) {
-    if (!invocation.unsigned && process.env[name] !== undefined) electronBuilderEnv[name] = process.env[name]
+    if (!invocation.unsigned && !invocation.adHoc && process.env[name] !== undefined) electronBuilderEnv[name] = process.env[name]
   }
   await runPnpm(['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
   await runPnpm(['run', 'release:pack', '--family', 'dsh', '--out', buildPaths.packedDsh], buildEnv, REPOSITORY_ROOT)
@@ -311,7 +323,7 @@ async function main(): Promise<void> {
   await runPnpm(['run', 'prepare:packages'], targetEnv)
   await runPnpm(['run', 'prepare:dsh'], targetEnv)
   if (invocation.prepareOnly) return
-  if (target.platform === 'darwin' && !invocation.directory) {
+  if (target.platform === 'darwin' && !invocation.directory && !invocation.adHoc) {
     await runPnpm([
       ...desktopElectronBuilderArguments(target, true),
       '--config.mac.notarize=false',
@@ -325,7 +337,9 @@ async function main(): Promise<void> {
   } else {
     await runPnpm(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv)
   }
-  if (!invocation.directory && !invocation.unsigned) writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)
+  if (!invocation.directory && !invocation.unsigned && !invocation.adHoc) {
+    writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)
+  }
 }
 
 if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) await main()

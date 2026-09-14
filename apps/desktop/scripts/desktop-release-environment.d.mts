@@ -13,6 +13,9 @@ export interface MacOSSigningEnvironment {
   readonly teamId: string
 }
 
+/** Release certificate identity or certificate-free internal-test signing. */
+export type MacOSCodeSigningIdentity = MacOSSigningEnvironment | 'ad-hoc'
+
 /** Apple ID credentials accepted by notarytool. */
 export interface MacOSAppleIdNotarizationEnvironment {
   readonly appleId: string
@@ -42,9 +45,18 @@ export type MacOSNotarizationEnvironment =
 /**
  * Resolve and validate the application identifier shared by every platform target.
  * @param env - Packaging environment.
+ * @param adHoc - Allow a local test identifier when the application ID is absent.
  * @returns Reverse-DNS application identifier.
  */
-export function resolveDesktopAppId(env: NodeJS.ProcessEnv): string
+export function resolveDesktopAppId(env: NodeJS.ProcessEnv, adHoc?: boolean): string
+
+/**
+ * Resolve the explicit macOS internal-test signing mode.
+ * @param env - Packaging environment.
+ * @param platform - Selected target platform.
+ * @returns Whether to use ad-hoc signing without notarization.
+ */
+export function resolveMacOSAdHocBuild(env: NodeJS.ProcessEnv, platform: string): boolean
 
 /**
  * Resolve and validate the public identity expected on a macOS release.

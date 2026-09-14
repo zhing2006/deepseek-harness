@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   desktopTargetBuildPaths,
   resolveDesktopBuildTarget,
+  resolveDesktopTargetBuildPaths,
 } from '../scripts/desktop-build-paths.mjs'
 
 describe('desktop build paths', () => {
@@ -36,6 +37,18 @@ describe('desktop build paths', () => {
     const x64 = desktopTargetBuildPaths('mac-x64')
     expect(arm64.downloads).toBe(x64.downloads)
     expect(arm64.downloads).not.toContain(`${sep}targets${sep}`)
+  })
+
+  it('isolates ad-hoc preparation and artifacts from release inputs on the same target', () => {
+    const release = desktopTargetBuildPaths('mac-arm64')
+    const adHoc = resolveDesktopTargetBuildPaths({ DSH_DESKTOP_AD_HOC: '1' }, 'darwin', 'arm64')
+    for (const key of Object.keys(release) as (keyof typeof release)[]) {
+      if (key === 'downloads') expect(adHoc[key]).toBe(release[key])
+      else expect(adHoc[key]).not.toBe(release[key])
+    }
+    expect(adHoc.artifacts).toContain(join('mac-arm64', 'adhoc', 'artifacts'))
+    expect(() => resolveDesktopTargetBuildPaths({ DSH_DESKTOP_AD_HOC: '1' }, 'win32', 'x64'))
+      .toThrow(/require macOS/u)
   })
 
   it('resolves environment overrides and rejects unsupported targets', () => {

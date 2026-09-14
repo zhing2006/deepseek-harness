@@ -1,45 +1,45 @@
-import type { MacOSSigningEnvironment } from './desktop-release-environment.mjs'
+import type { MacOSCodeSigningIdentity, MacOSSigningEnvironment } from './desktop-release-environment.mjs'
 
 /**
- * Reject signature metadata that does not name the company release authority and team.
+ * Require the selected Developer ID identity or an ad-hoc signature without a team.
  * @param details - Output from `codesign --display --verbose=4`.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  */
-export function assertMacOSSignatureDetails(details: string, expected: MacOSSigningEnvironment): void
+export function assertMacOSSignatureDetails(details: string, expected: MacOSCodeSigningIdentity): void
 
 /**
- * Require the signature properties Apple validates for executable runtime content.
+ * Require hardened runtime and, for Developer ID releases, a secure timestamp.
  * @param details - Output from `codesign --display --verbose=4`.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  */
-export function assertMacOSRuntimeSignatureDetails(details: string, expected: MacOSSigningEnvironment): void
+export function assertMacOSRuntimeSignatureDetails(details: string, expected: MacOSCodeSigningIdentity): void
 
 /**
  * Sign one Mach-O file embedded in the runtime tree.
  * @param path - Writable standalone Mach-O file.
  * @param identifier - Stable code-signing identifier derived from the release app ID and CAS digest.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  * @returns Resolves after codesign exits successfully.
  */
 export function signMacOSRuntimeCode(
   path: string,
   identifier: string,
-  expected: MacOSSigningEnvironment,
+  expected: MacOSCodeSigningIdentity,
 ): Promise<void>
 
 /**
  * Verify one Mach-O file embedded in the runtime tree.
  * @param path - Mach-O file to inspect.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  */
-export function verifyMacOSRuntimeCode(path: string, expected: MacOSSigningEnvironment): void
+export function verifyMacOSRuntimeCode(path: string, expected: MacOSCodeSigningIdentity): void
 
 /**
- * Verify the full application signature and its release owner.
+ * Verify the full application signature and its selected signing identity.
  * @param appPath - Path to the packaged `.app` directory.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  */
-export function verifyMacOSSignature(appPath: string, expected: MacOSSigningEnvironment): void
+export function verifyMacOSSignature(appPath: string, expected: MacOSCodeSigningIdentity): void
 
 /**
  * Verify an independently distributed application's signature, ticket, and Gatekeeper acceptance.
@@ -72,9 +72,9 @@ export interface MacOSAfterSignContext {
 /**
  * Verify the macOS application produced by electron-builder's signing phase.
  * @param context - electron-builder hook context.
- * @param expected - Public release identity.
+ * @param expected - Required release or ad-hoc identity.
  */
 export function verifyMacOSSignatureAfterSign(
   context: MacOSAfterSignContext,
-  expected: MacOSSigningEnvironment,
+  expected: MacOSCodeSigningIdentity,
 ): void

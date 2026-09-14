@@ -6,6 +6,8 @@ Status: implemented
 
 profile 修改与恢复遵循[直接修改 profile 决策](2026-09-09-desktop-in-place-profile.zh.md)。
 
+无需证书的 macOS 插件测试使用独立的 [ad-hoc 打包模式](../process/2026-09-14-macos-ad-hoc-desktop-packaging.zh.md)；下文的签名与公证要求适用于发布构建。
+
 ## 问题
 
 DeepSeek Harness 需要一个复用 Web UI 的 Electron 桌面应用。该应用无需系统 Node.js 或 pnpm 即可工作，通过应用内置 pnpm 安装 dsh 与桌面插件，并通过一个面向用户的流程更新完整桌面发布。

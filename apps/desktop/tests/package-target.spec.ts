@@ -83,8 +83,46 @@ describe('desktop package target', () => {
       DSH_DESKTOP_APP_ID: 'com.example.desktop',
       CSC_IDENTITY_AUTO_DISCOVERY: 'false',
       DSH_DESKTOP_UNSIGNED: '1',
+      DSH_DESKTOP_AD_HOC: '0',
     })
-    expect(desktopElectronBuilderEnvironment(environment, false)).toEqual({ ...environment, DSH_DESKTOP_UNSIGNED: '0' })
+    expect(desktopElectronBuilderEnvironment(environment, false)).toEqual({ ...environment, DSH_DESKTOP_UNSIGNED: '0', DSH_DESKTOP_AD_HOC: '0' })
+  })
+
+  it.each(['mac-arm64', 'mac-x64'])('accepts ad-hoc packages and directories for %s', (target) => {
+    expect(parseDesktopPackageInvocation([target, '--ad-hoc'], 'darwin', 'arm64')).toMatchObject({
+      adHoc: true, unsigned: false, directory: false,
+    })
+    expect(parseDesktopPackageInvocation([target, '--ad-hoc', '--dir'], 'darwin', 'arm64')).toMatchObject({
+      adHoc: true, directory: true,
+    })
+    expect(parseDesktopPackageInvocation([target], 'darwin', 'arm64').adHoc).toBe(false)
+  })
+
+  it('rejects ad-hoc signing for Windows and conflicting signing flags', () => {
+    expect(() => parseDesktopPackageInvocation(['win-x64', '--ad-hoc'], 'win32', 'x64')).toThrow(/requires macOS/u)
+    expect(() => parseDesktopPackageInvocation(['mac-arm64', '--ad-hoc', '--unsigned'], 'darwin', 'arm64'))
+      .toThrow(/mutually exclusive/u)
+  })
+
+  it('removes Apple credentials for ad-hoc preparation and prevents inherited opt-in on release commands', () => {
+    const environment = {
+      DSH_DESKTOP_APP_ID: 'com.example.test',
+      DSH_DESKTOP_AD_HOC: '1',
+      DSH_DESKTOP_MACOS_SIGNING_IDENTITY: 'Example (TEAMID1234)',
+      DSH_DESKTOP_MACOS_TEAM_ID: 'TEAMID1234',
+      APPLE_API_KEY: '/private/test.p8',
+      APPLE_APP_SPECIFIC_PASSWORD: 'test-secret',
+      APPLE_KEYCHAIN_PROFILE: 'test-notary',
+      CSC_LINK: '/private/test.p12',
+      CSC_KEY_PASSWORD: 'test-secret',
+    }
+    expect(desktopElectronBuilderEnvironment(environment, false, true)).toEqual({
+      DSH_DESKTOP_APP_ID: 'com.example.test',
+      DSH_DESKTOP_AD_HOC: '1',
+      DSH_DESKTOP_UNSIGNED: '0',
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    })
+    expect(desktopElectronBuilderEnvironment(environment, false).DSH_DESKTOP_AD_HOC).toBe('0')
   })
 
   it.each([false, true])('pins the Windows archive filter for the NSIS decoder (unsigned: %s)', (unsigned) => {

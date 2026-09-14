@@ -1,17 +1,23 @@
-/** Sign runtime code and verify that packaged macOS artifacts carry the company release identity. */
+/** Sign runtime code and verify macOS release or internal-test signatures. */
 
 import { spawn, spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { resolveMacOSSigningEnvironment } from './desktop-release-environment.mjs'
 
 /**
- * Reject signature metadata that does not name the company release authority and team.
+ * Require the selected Developer ID identity or an ad-hoc signature without a team.
  * @param {string} details - Output from `codesign --display --verbose=4`.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {void}
  */
 export function assertMacOSSignatureDetails(details, expected) {
   const fields = new Set(details.split(/\r?\n/u).map(line => line.trim()))
+  if (expected === 'ad-hoc') {
+    if (!fields.has('Signature=adhoc') || !fields.has('TeamIdentifier=not set')) {
+      throw new Error('desktop macOS signing: expected an ad-hoc signature without a developer team')
+    }
+    return
+  }
   const expectedAuthority = `Authority=Developer ID Application: ${expected.signingIdentity}`
   const expectedTeam = `TeamIdentifier=${expected.teamId}`
   const missing = [expectedAuthority, expectedTeam].filter(field => !fields.has(field))
@@ -21,18 +27,18 @@ export function assertMacOSSignatureDetails(details, expected) {
 }
 
 /**
- * Require the signature properties Apple validates for executable runtime content.
+ * Require hardened runtime and, for Developer ID releases, a secure timestamp.
  * @param {string} details - Output from `codesign --display --verbose=4`.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {void}
  */
 export function assertMacOSRuntimeSignatureDetails(details, expected) {
   assertMacOSSignatureDetails(details, expected)
   const fields = details.split(/\r?\n/u).map(line => line.trim())
-  if (!fields.some(line => /^Timestamp=.+/u.test(line))) {
+  if (expected !== 'ad-hoc' && !fields.some(line => /^Timestamp=.+/u.test(line))) {
     throw new Error('desktop macOS signing: runtime signature has no secure timestamp')
   }
-  if (!fields.some(line => /\bflags=0x[0-9a-f]+\(runtime\)(?:\s|$)/iu.test(line))) {
+  if (!fields.some(line => /\bflags=0x[0-9a-f]+\([^)]*\bruntime\b[^)]*\)(?:\s|$)/iu.test(line))) {
     throw new Error('desktop macOS signing: runtime signature does not enable hardened runtime')
   }
 }
@@ -109,15 +115,15 @@ function runCodeSign(args) {
  * Sign one Mach-O file embedded in the runtime tree.
  * @param {string} path - Writable standalone Mach-O file.
  * @param {string} identifier - Stable code-signing identifier derived from the release app ID and CAS digest.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {Promise<void>} Resolves after codesign exits successfully.
  */
 export async function signMacOSRuntimeCode(path, identifier, expected) {
   await runAppleCommandAsync('/usr/bin/codesign', [
     '--force',
-    '--sign', expected.signingIdentity,
+    '--sign', expected === 'ad-hoc' ? '-' : expected.signingIdentity,
     '--identifier', identifier,
-    '--timestamp',
+    expected === 'ad-hoc' ? '--timestamp=none' : '--timestamp',
     '--options', 'runtime',
     path,
   ], 'codesign')
@@ -126,7 +132,7 @@ export async function signMacOSRuntimeCode(path, identifier, expected) {
 /**
  * Verify one Mach-O file embedded in the runtime tree.
  * @param {string} path - Mach-O file to inspect.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {void}
  */
 export function verifyMacOSRuntimeCode(path, expected) {
@@ -136,9 +142,9 @@ export function verifyMacOSRuntimeCode(path, expected) {
 }
 
 /**
- * Verify the full application signature and its release owner.
+ * Verify the full application signature and its selected signing identity.
  * @param {string} appPath - Path to the packaged `.app` directory.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {void}
  */
 export function verifyMacOSSignature(appPath, expected) {
@@ -176,14 +182,16 @@ export function verifyMacOSDiskImage(diskImagePath, expected) {
 /**
  * Verify the macOS application produced by electron-builder's signing phase.
  * @param {{ electronPlatformName: string, appOutDir: string, packager: { appInfo: { productFilename: string } } }} context - electron-builder hook context.
- * @param {{ signingIdentity: string, teamId: string }} expected - Public release identity.
+ * @param {import('./desktop-release-environment.mjs').MacOSCodeSigningIdentity} expected - Required release or ad-hoc identity.
  * @returns {void}
  */
 export function verifyMacOSSignatureAfterSign(context, expected) {
   if (context.electronPlatformName !== 'darwin') return
   const appPath = resolve(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
   verifyMacOSSignature(appPath, expected)
-  process.stdout.write(`desktop macOS signing: verified Developer ID Application: ${expected.signingIdentity} (${expected.teamId})\n`)
+  process.stdout.write(expected === 'ad-hoc'
+    ? 'desktop macOS signing: verified ad-hoc application signature\n'
+    : `desktop macOS signing: verified Developer ID Application: ${expected.signingIdentity} (${expected.teamId})\n`)
 }
 
 if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) {
