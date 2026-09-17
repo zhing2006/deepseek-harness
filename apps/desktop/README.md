@@ -25,6 +25,8 @@ Electron owns `$DSH_HOME/profiles/desktop`. Its `dependencies` contains only ins
 
 The local startup page exposes startup status and available recovery actions; the loaded dsh renderer receives only the desktop protocol marker. The separate plugin window receives structured list, install, remove, update, and update-check operations; neither renderer receives filesystem access, raw Electron IPC, a shell, or arbitrary pnpm arguments.
 
+The standard Edit menu provides copy, paste, cut, select-all, undo, and redo shortcuts in the focused window, including the plugin manager's package input and selectable error text.
+
 Electron chooses typed English or Chinese shell copy from its application locale and falls back to English. Menus, native dialogs, the startup page, and the plugin-management renderer use the same locale payload; the repository Client UI i18n gate checks these desktop sources.
 
 ### Runtime and plugin activation
